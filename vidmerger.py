@@ -8,12 +8,14 @@ from pymediainfo import MediaInfo
 class VideoMerger():
     def __init__(self, output_format='avi', size=None, shuffle=True,
                  marker=True, marker_size=0.08, marker_offset=0.05, marker_duration=1,
-                 pause_duration=3, pause_delta=0, last_pause=True,
+                 pause_duration=3, pause_delta=0, last_pause=True, img_in_pause=True,
                  ready_duration=5, thanks_duration=5, fixed_classes=None):
         self.vids = []
+        self.imgs = {}
         self.basenames = []
         self.depth = None
         self.__formats = ('.avi', '.mp4')
+        self.__img_formats = ('.bmp', '.jpg', '.jpeg', '.png')
 
         if output_format == 'avi':
             self.__fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -34,6 +36,7 @@ class VideoMerger():
         self.pause_duration = pause_duration
         self.pause_delta = pause_delta
         self.last_pause = last_pause
+        self.img_in_pause = img_in_pause
         self.ready_duration = ready_duration
         self.thanks_duration = thanks_duration
         self.fixed_classes = fixed_classes
@@ -46,10 +49,12 @@ class VideoMerger():
                 if inp[-1] == '/' or inp[-1] == '\\':
                     inp = inp[:-1]
                 self.__getAllVideos(inp)
+                self.__getAllImages(inp)
         else:
             if input_folder[-1] == '/' or input_folder[-1] == '\\':
                 input_folder = input_folder[:-1]
             self.__getAllVideos(input_folder)
+            self.__getAllImages(input_folder)
 
         assert len(self.vids) > 0, 'No video data!'
 
@@ -119,12 +124,22 @@ class VideoMerger():
 
             # Adding pause
             current_pause_duration = (2 * rnd.random() - 1) * self.pause_delta + self.pause_duration
-            if (self.last_pause is True) or (self.last_pause is False and i + 1 < len(self.vids)):
+            current_video_name = self.__path_to_name(vid)
+            if self.img_in_pause and (current_video_name in self.imgs):
+                img = cv2.imread(self.imgs[current_video_name])
+                img = self.__resizeImage(img, (max_width, max_height))
                 for t in range(int(frame_rate * current_pause_duration)):
                     if t / frame_rate <= self.marker_duration:
-                        out.write(self.__drawMarker(black, self.marker_size, self.marker_offset))
+                        out.write(self.__drawMarker(img, self.marker_size, self.marker_offset))
                     else:
-                        out.write(black)
+                        out.write(self.__drawMarker(img, self.marker_size, self.marker_offset, color=(0, 0, 0)))
+            else:
+                if (self.last_pause is True) or (self.last_pause is False and i + 1 < len(self.vids)):
+                    for t in range(int(frame_rate * current_pause_duration)):
+                        if t / frame_rate <= self.marker_duration:
+                            out.write(self.__drawMarker(black, self.marker_size, self.marker_offset))
+                        else:
+                            out.write(black)
 
             # Saving duration
             onsets.append(video_duration / frame_rate + current_pause_duration)
@@ -187,6 +202,23 @@ class VideoMerger():
                 dirname = os.path.dirname(path)
                 self.basenames.append(os.path.basename(dirname))
 
+    def __getAllImages(self, path, curdepth=0):
+        if self.depth is not None:
+            if curdepth >= self.depth:
+                return
+
+        if os.path.isdir(path):
+            for file in os.listdir(path):
+                fullpath = path + '/' + file
+                if os.path.isdir(fullpath):
+                    self.__getAllImages(fullpath, curdepth + 1)
+                elif os.path.isfile(fullpath):
+                    if file.endswith(self.__img_formats):
+                        self.imgs[self.__path_to_name(fullpath)] = fullpath
+        elif os.path.isfile(path):
+            if path.endswith(self.__img_formats):
+                self.imgs[self.__path_to_name(path)] = path
+
     def __getFileDetails(self, filepath):
         media_info = MediaInfo.parse(filepath)
         result = {}
@@ -234,3 +266,8 @@ class VideoMerger():
         with open(filename, 'w') as f:
             for d in data:
                 f.write(d + '\n')
+
+    def __path_to_name(self, path):
+        filename = path[path.rfind('/') + 1:]
+        name = filename[:filename.rfind('.')]
+        return name
