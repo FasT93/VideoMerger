@@ -145,8 +145,12 @@ class VideoMerger():
             onsets.append(video_duration / frame_rate + current_pause_duration)
 
         # Thanks for attention screen
+        img = self.__drawText(black, 'Thanks for your attention', textfont, font_scale=font_scale_thanks)
         for t in range(int(frame_rate * self.thanks_duration)):
-            out.write(self.__drawText(black, 'Thanks for your attention', textfont, font_scale=font_scale_thanks))
+            if t / frame_rate <= self.marker_duration:
+                out.write(self.__drawMarker(img, self.marker_size, self.marker_offset))
+            else:
+                out.write(self.__drawMarker(img, self.marker_size, self.marker_offset, color=(0, 0, 0)))
 
         out.release()
         cv2.destroyAllWindows()
