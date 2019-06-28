@@ -82,7 +82,7 @@ class VideoMerger():
         black = np.zeros((max_height, max_width, 3), np.uint8)
 
         # Ready screen
-        for t in range(int(frame_rate * self.ready_duration)):
+        for t in range(int(round(frame_rate * self.ready_duration))):
             out.write(self.__drawText(black, 'Ready', textfont, font_scale=font_scale_ready))
 
         # Go throw all videos
@@ -125,28 +125,30 @@ class VideoMerger():
             # Adding pause
             current_pause_duration = (2 * rnd.random() - 1) * self.pause_delta + self.pause_duration
             current_video_name = self.__path_to_name(vid)
+            current_pause_frames = int(frame_rate * current_pause_duration)
             if self.img_in_pause and (current_video_name in self.imgs):
                 img = cv2.imread(self.imgs[current_video_name])
                 img = self.__resizeImage(img, (max_width, max_height))
-                for t in range(int(frame_rate * current_pause_duration)):
+                for t in range(current_pause_frames):
                     if t / frame_rate <= self.marker_duration:
                         out.write(self.__drawMarker(img, self.marker_size, self.marker_offset))
                     else:
                         out.write(self.__drawMarker(img, self.marker_size, self.marker_offset, color=(0, 0, 0)))
             else:
                 if (self.last_pause is True) or (self.last_pause is False and i + 1 < len(self.vids)):
-                    for t in range(int(frame_rate * current_pause_duration)):
+                    for t in range(current_pause_frames):
                         if t / frame_rate <= self.marker_duration:
                             out.write(self.__drawMarker(black, self.marker_size, self.marker_offset))
                         else:
                             out.write(black)
 
             # Saving duration
-            onsets.append(video_duration / frame_rate + current_pause_duration)
+            # onsets.append(video_duration / frame_rate + current_pause_duration)
+            onsets.append((video_duration + current_pause_frames) / frame_rate)
 
         # Thanks for attention screen
         img = self.__drawText(black, 'Thanks for your attention', textfont, font_scale=font_scale_thanks)
-        for t in range(int(frame_rate * self.thanks_duration)):
+        for t in range(int(round(frame_rate * self.thanks_duration))):
             if t / frame_rate <= self.marker_duration:
                 out.write(self.__drawMarker(img, self.marker_size, self.marker_offset))
             else:
