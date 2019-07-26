@@ -9,7 +9,8 @@ class VideoMerger():
     def __init__(self, output_format='avi', size=None, shuffle=True,
                  marker=True, marker_size=0.08, marker_offset=0.05, marker_duration=1,
                  pause_duration=3, pause_delta=0, last_pause=True, img_in_pause=True,
-                 ready_duration=5, thanks_duration=5, fixed_classes=None):
+                 ready_duration=5, thanks_duration=5, fixed_classes=None,
+                 save_screenshots=True):
         self.vids = []
         self.imgs = {}
         self.basenames = []
@@ -40,6 +41,7 @@ class VideoMerger():
         self.ready_duration = ready_duration
         self.thanks_duration = thanks_duration
         self.fixed_classes = fixed_classes
+        self.save_screenshots = save_screenshots
 
     def merge(self, input_folder, output_folder='newvideo', depth=None, show=False):
         self.vids.clear()
@@ -69,6 +71,10 @@ class VideoMerger():
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
+        if self.save_screenshots:
+            if not os.path.exists(output_folder + '/imgs'):
+                os.makedirs(output_folder + '/imgs')
+
         info = self.__getAllInfo()
         max_width = max([x['width'] for x in info])
         max_height = max([x['height'] for x in info])
@@ -93,13 +99,23 @@ class VideoMerger():
 
             # Saving video
             cap = cv2.VideoCapture(vid)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             video_duration = 0
             while (cap.isOpened()):
                 ret, frame = cap.read()
+
+                # Maybe TODO later: Get FPS using cv2
+                # fps = cap.get(cv2.CAP_PROP_FPS)
+
                 if ret:
                     # Resizing image
                     if max_width != frame.shape[1] or max_height != frame.shape[0]:
                         frame = self.__resizeImage(frame, (max_width, max_height))
+
+                    # Saving screenshot
+                    if self.save_screenshots:
+                        if video_duration == frame_count // 2:
+                            cv2.imwrite(output_folder + '/imgs/' + self.__path_to_name(vid) + '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
 
                     # Adding white marker
                     if self.marker:
