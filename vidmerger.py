@@ -8,12 +8,15 @@ from pymediainfo import MediaInfo
 class VideoMerger():
     def __init__(self, output_format='avi', size=None, shuffle=True,
                  marker=True, marker_size=0.08, marker_offset=0.05, marker_duration=1,
-                 pause_duration=3, pause_delta=0, last_pause=True,
-                 ready_duration=5, thanks_duration=5, fixed_classes=None):
+                 pause_duration=3, pause_delta=0, last_pause=True, img_in_pause=True,
+                 ready_duration=5, thanks_duration=5, fixed_classes=None,
+                 save_screenshots=True, setCenterMarker = False):
         self.vids = []
+        self.imgs = {}
         self.basenames = []
         self.depth = None
         self.__formats = ('.avi', '.mp4')
+        self.__img_formats = ('.bmp', '.jpg', '.jpeg', '.png')
 
         if output_format == 'avi':
             self.__fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -34,9 +37,12 @@ class VideoMerger():
         self.pause_duration = pause_duration
         self.pause_delta = pause_delta
         self.last_pause = last_pause
+        self.img_in_pause = img_in_pause
         self.ready_duration = ready_duration
         self.thanks_duration = thanks_duration
         self.fixed_classes = fixed_classes
+        self.save_screenshots = save_screenshots
+        self.centerMarker = setCenterMarker
 
     def merge(self, input_folder, output_folder='newvideo', depth=None, show=False):
         self.vids.clear()
@@ -46,10 +52,12 @@ class VideoMerger():
                 if inp[-1] == '/' or inp[-1] == '\\':
                     inp = inp[:-1]
                 self.__getAllVideos(inp)
+                self.__getAllImages(inp)
         else:
             if input_folder[-1] == '/' or input_folder[-1] == '\\':
                 input_folder = input_folder[:-1]
             self.__getAllVideos(input_folder)
+            self.__getAllImages(input_folder)
 
         assert len(self.vids) > 0, 'No video data!'
 
@@ -64,6 +72,10 @@ class VideoMerger():
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
+        if self.save_screenshots:
+            if not os.path.exists(output_folder + '/imgs'):
+                os.makedirs(output_folder + '/imgs')
+
         info = self.__getAllInfo()
         max_width = max([x['width'] for x in info])
         max_height = max([x['height'] for x in info])
@@ -77,7 +89,7 @@ class VideoMerger():
         black = np.zeros((max_height, max_width, 3), np.uint8)
 
         # Ready screen
-        for t in range(int(frame_rate * self.ready_duration)):
+        for t in range(int(round(frame_rate * self.ready_duration))):
             out.write(self.__drawText(black, 'Ready', textfont, font_scale=font_scale_ready))
 
         # Go throw all videos
@@ -88,13 +100,23 @@ class VideoMerger():
 
             # Saving video
             cap = cv2.VideoCapture(vid)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             video_duration = 0
             while (cap.isOpened()):
                 ret, frame = cap.read()
+
+                # Maybe TODO later: Get FPS using cv2
+                # fps = cap.get(cv2.CAP_PROP_FPS)
+
                 if ret:
                     # Resizing image
                     if max_width != frame.shape[1] or max_height != frame.shape[0]:
                         frame = self.__resizeImage(frame, (max_width, max_height))
+
+                    # Saving screenshot
+                    if self.save_screenshots:
+                        if video_duration == frame_count // 2:
+                            cv2.imwrite(output_folder + '/imgs/' + self.__path_to_name(vid) + '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
 
                     # Adding white marker
                     if self.marker:
@@ -103,6 +125,9 @@ class VideoMerger():
                             marker_counter += 1
                         else:
                             frame = self.__drawMarker(frame, self.marker_size, self.marker_offset, color=(0, 0, 0))
+
+                    if self.centerMarker:
+                        frame = self.__drawMarker(frame, 0.01, 0.5, color=(0, 0, 255), center=True)
 
                     # Showing videos
                     if show:
@@ -119,19 +144,38 @@ class VideoMerger():
 
             # Adding pause
             current_pause_duration = (2 * rnd.random() - 1) * self.pause_delta + self.pause_duration
-            if (self.last_pause is True) or (self.last_pause is False and i + 1 < len(self.vids)):
-                for t in range(int(frame_rate * current_pause_duration)):
+            current_video_name = self.__path_to_name(vid)
+            current_pause_frames = int(frame_rate * current_pause_duration)
+            if self.img_in_pause and (current_video_name in self.imgs):
+                img = cv2.imread(self.imgs[current_video_name])
+                img = self.__resizeImage(img, (max_width, max_height))
+                for t in range(current_pause_frames):
                     if t / frame_rate <= self.marker_duration:
-                        out.write(self.__drawMarker(black, self.marker_size, self.marker_offset))
+                        imgOut = (self.__drawMarker(img, self.marker_size, self.marker_offset))
                     else:
-                        out.write(black)
+                        imgOut = (self.__drawMarker(img, self.marker_size, self.marker_offset, color=(0, 0, 0)))
+                    if self.centerMarker:
+                        imgOut = self.__drawMarker(imgOut, 0.01, 0.5, color=(0, 0, 255), center=True)
+                    out.write(imgOut)
+            else:
+                if (self.last_pause is True) or (self.last_pause is False and i + 1 < len(self.vids)):
+                    for t in range(current_pause_frames):
+                        if t / frame_rate <= self.marker_duration:
+                            out.write(self.__drawMarker(black, self.marker_size, self.marker_offset))
+                        else:
+                            out.write(black)
 
             # Saving duration
-            onsets.append(video_duration / frame_rate + current_pause_duration)
+            # onsets.append(video_duration / frame_rate + current_pause_duration)
+            onsets.append((video_duration + current_pause_frames) / frame_rate)
 
         # Thanks for attention screen
-        for t in range(int(frame_rate * self.thanks_duration)):
-            out.write(self.__drawText(black, 'Thanks for your attention', textfont, font_scale=font_scale_thanks))
+        img = self.__drawText(black, 'Thanks for your attention', textfont, font_scale=font_scale_thanks)
+        for t in range(int(round(frame_rate * self.thanks_duration))):
+            if t / frame_rate <= self.marker_duration:
+                out.write(self.__drawMarker(img, self.marker_size, self.marker_offset))
+            else:
+                out.write(self.__drawMarker(img, self.marker_size, self.marker_offset, color=(0, 0, 0)))
 
         out.release()
         cv2.destroyAllWindows()
@@ -187,6 +231,23 @@ class VideoMerger():
                 dirname = os.path.dirname(path)
                 self.basenames.append(os.path.basename(dirname))
 
+    def __getAllImages(self, path, curdepth=0):
+        if self.depth is not None:
+            if curdepth >= self.depth:
+                return
+
+        if os.path.isdir(path):
+            for file in os.listdir(path):
+                fullpath = path + '/' + file
+                if os.path.isdir(fullpath):
+                    self.__getAllImages(fullpath, curdepth + 1)
+                elif os.path.isfile(fullpath):
+                    if file.endswith(self.__img_formats):
+                        self.imgs[self.__path_to_name(fullpath)] = fullpath
+        elif os.path.isfile(path):
+            if path.endswith(self.__img_formats):
+                self.imgs[self.__path_to_name(path)] = path
+
     def __getFileDetails(self, filepath):
         media_info = MediaInfo.parse(filepath)
         result = {}
@@ -205,13 +266,17 @@ class VideoMerger():
 
     # size - proportion of minimal size
     # offset - proportion of minimal size
-    def __drawMarker(self, img, size=0.08, offset=0.05, color=(255, 255, 255)):
+    def __drawMarker(self, img, size=0.08, offset=0.05, color=(255, 255, 255), center = False):
         temp = img.copy()
         w, h = temp.shape[1], temp.shape[0]
         minsize = min((w, h))
         r = int((minsize * size) / 2)
-        offset = int(minsize * offset)
-        cv2.circle(temp, (offset + r, h - offset - r), r, color, thickness=-1, lineType=cv2.LINE_AA)
+        offsetX = int(minsize * offset)
+        offsetY = offsetX
+        if center:
+            offsetX = int(w * offset)
+            offsetY = int(h * offset)
+        cv2.circle(temp, (offsetX + r, h - offsetY - r), r, color, thickness=-1, lineType=cv2.LINE_AA)
         return temp
 
     def __getTextScale(self, text, target_width, target_height, font, thickness, s_start=0.5, s_end=20, s_points=50):
@@ -234,3 +299,8 @@ class VideoMerger():
         with open(filename, 'w') as f:
             for d in data:
                 f.write(d + '\n')
+
+    def __path_to_name(self, path):
+        filename = path[path.rfind('/') + 1:]
+        name = filename[:filename.rfind('.')]
+        return name
